@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTT Radar Scope</title>
+<style>
+  :root {
+    --bg: #05090c; --panel: #0b141a; --edge: #16323b;
+    --scope: #0affc2; --dim: #0a5a4a; --grid: #0e2a28;
+    --ping: #3a6f6a; --confirm: #38f0c8; --coast: #ffb347;
+    --tent: #6f8fa8; --text: #bfe9df; --muted: #5f8a80; --warn: #ff5d6c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "SF Mono", ui-monospace, "Menlo", monospace; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+  #side { background: var(--panel); border-right: 1px solid var(--edge);
+    padding: 18px 18px 12px; display: flex; flex-direction: column; gap: 16px;
+    overflow-y: auto; }
+  h1 { font-size: 15px; letter-spacing: 2px; margin: 0; color: var(--scope);
+    text-transform: uppercase; }
+  h1 span { color: var(--muted); display: block; font-size: 10px; letter-spacing: 1px;
+    margin-top: 4px; }
+  .group { display: flex; flex-direction: column; gap: 7px; }
+  .label { font-size: 10px; letter-spacing: 1.5px; color: var(--muted);
+    text-transform: uppercase; }
+  .scenarios { display: flex; flex-direction: column; gap: 6px; }
+  button.scn { text-align: left; background: #08121a; color: var(--text);
+    border: 1px solid var(--edge); border-radius: 6px; padding: 9px 11px;
+    cursor: pointer; font-family: inherit; font-size: 12px; transition: .12s; }
+  button.scn:hover { border-color: var(--scope); }
+  button.scn.active { border-color: var(--scope); background: #0c1f22;
+    box-shadow: inset 0 0 0 1px var(--scope); }
+  button.scn small { display: block; color: var(--muted); font-size: 10px;
+    margin-top: 3px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row input[type=range] { flex: 1; accent-color: var(--scope); }
+  .ctrl { display: flex; gap: 8px; }
+  .ctrl button { flex: 1; background: #0c1f22; color: var(--scope);
+    border: 1px solid var(--scope); border-radius: 6px; padding: 8px;
+    cursor: pointer; font-family: inherit; font-size: 12px; letter-spacing: 1px; }
+  .ctrl button:disabled { opacity: .4; cursor: default; border-color: var(--edge);
+    color: var(--muted); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
+    font-size: 12px; }
+  .stat b { display: block; font-size: 19px; color: var(--scope); font-weight: 600; }
+  .stat span { color: var(--muted); font-size: 10px; letter-spacing: 1px;
+    text-transform: uppercase; }
+  .legend { font-size: 11px; display: flex; flex-direction: column; gap: 5px; }
+  .legend div { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  #scopeWrap { position: relative; }
+  #scope { display: block; width: 100%; height: 100%; }
+  #banner { position: absolute; top: 14px; left: 16px; font-size: 11px;
+    color: var(--muted); letter-spacing: 1px; }
+  #banner b { color: var(--scope); }
+  /* Live mode indicator */
+  #liveIndicator { display: none; position: absolute; top: 14px; right: 16px;
+    font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: #ff5d6c; font-weight: 700; align-items: center; gap: 6px; }
+  #liveIndicator.on { display: flex; }
+  #liveDot { width: 8px; height: 8px; border-radius: 50%; background: #ff5d6c;
+    animation: pulse 1.4s infinite; }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .4; transform: scale(0.7); }
+  }
+  /* Error toast */
+  #toast { display: none; position: absolute; bottom: 18px; left: 50%;
+    transform: translateX(-50%); background: #1a0a0a; border: 1px solid var(--warn);
+    color: var(--warn); padding: 8px 16px; border-radius: 6px; font-size: 11px;
+    letter-spacing: .5px; white-space: nowrap; }
+  #toast.show { display: block; }
+  /* Live badge on scenario buttons */
+  .live-badge { display: inline-block; margin-left: 6px; font-size: 9px;
+    padding: 1px 5px; border-radius: 3px; background: #3a0a0a;
+    color: #ff5d6c; border: 1px solid #5a1a1a; letter-spacing: 1px;
+    vertical-align: middle; }
+  .label-group { font-size: 10px; letter-spacing: 1.5px; color: var(--muted);
+    text-transform: uppercase; margin-top: 4px; margin-bottom: 2px; }
+  .foot { margin-top: auto; font-size: 9px; color: var(--muted); line-height: 1.5;
+    letter-spacing: .5px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>MTT Radar Scope<span>Multi-Target Tracking Engine</span></h1>
+
+    <div class="group">
+      <div class="label">Scenario</div>
+      <div class="scenarios" id="scenarios"></div>
+    </div>
+
+    <div class="group">
+      <div class="label">Feed speed · <span id="speedVal">8</span> fps</div>
+      <div class="row"><input type="range" id="speed" min="1" max="30" value="8"></div>
+      <div class="ctrl" id="speedCtrl">
+        <button id="play">▶ START</button>
+        <button id="stop" disabled>■ STOP</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Live State</div>
+      <div class="stats">
+        <div class="stat"><b id="s_frame">0</b><span>Frame</span></div>
+        <div class="stat"><b id="s_pings">0</b><span>Pings</span></div>
+        <div class="stat"><b id="s_conf">0</b><span>Confirmed</span></div>
+        <div class="stat"><b id="s_tent">0</b><span>Tentative</span></div>
+        <div class="stat"><b id="s_spawn">0</b><span>Spawned</span></div>
+        <div class="stat"><b id="s_del">0</b><span>Deleted</span></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">DVR & Snapshot</div>
+      <div class="stats" style="grid-template-columns: 1fr;">
+        <div class="stat">
+          <b id="dvr_status" style="font-size: 14px;">0 / 20 min</b>
+          <span>DVR Buffer</span>
+        </div>
+        <div class="stat" id="rec_wrap">
+          <b id="rec_status" style="font-size: 14px; color: var(--coast);">Idle</b>
+          <span>Recording</span>
+        </div>
+        <button id="btn_record" class="scn" style="text-align: center; margin-top: 4px; padding: 6px;">Record New Snapshot</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Legend</div>
+      <div class="legend">
+        <div><span class="dot" style="background:var(--ping)"></span>Raw ping / clutter</div>
+        <div><span class="dot" style="background:var(--tent)"></span>Tentative track</div>
+        <div><span class="dot" style="background:var(--confirm)"></span>Confirmed track</div>
+        <div><span class="dot" style="background:var(--coast)"></span>Coasting (missed sweep)</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      ENU local tangent plane · range rings 10 km<br>
+      Engine: numpy/scipy vectorized Kalman · KD-tree gating ·<br>
+      sub-graph Hungarian association
+    </div>
+  </aside>
+
+  <div id="scopeWrap">
+    <canvas id="scope"></canvas>
+    <div id="banner"></div>
+    <div id="liveIndicator"><span id="liveDot"></span>LIVE · OpenSky</div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+const HALF_EXTENT = 68000;     // metres from origin shown to the scope edge
+const RING_STEP = 10000;       // range-ring spacing (m)
+const TRAIL_LEN = 60;          // history points kept per track for the tail
+
+let es = null, current = "VNS", trails = new Map(), latest = null;
+const cv = document.getElementById("scope");
+const ctx = cv.getContext("2d");
+
+function resize() {
+  const wrap = document.getElementById("scopeWrap");
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = wrap.clientWidth * dpr;
+  cv.height = wrap.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function geom() {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  const cx = w / 2, cy = h / 2;
+  const scale = Math.min(w, h) / 2 / HALF_EXTENT * 0.92;
+  return { w, h, cx, cy, scale };
+}
+function toScreen(x, y, g) { return [g.cx + x * g.scale, g.cy - y * g.scale]; }
+
+function draw() {
+  const g = geom();
+  ctx.clearRect(0, 0, g.w, g.h);
+
+  // range rings + cross-hairs
+  ctx.strokeStyle = getCss("--grid"); ctx.lineWidth = 1;
+  for (let r = RING_STEP; r <= HALF_EXTENT; r += RING_STEP) {
+    ctx.beginPath(); ctx.arc(g.cx, g.cy, r * g.scale, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(g.cx, 0); ctx.lineTo(g.cx, g.h);
+  ctx.moveTo(0, g.cy); ctx.lineTo(g.w, g.cy); ctx.stroke();
+  // origin marker (radar site)
+  ctx.fillStyle = getCss("--scope");
+  ctx.beginPath(); ctx.arc(g.cx, g.cy, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.font = "9px monospace"; ctx.fillStyle = getCss("--muted");
+  for (let r = RING_STEP; r <= HALF_EXTENT; r += RING_STEP)
+    ctx.fillText((r / 1000) + "km", g.cx + 3, g.cy - r * g.scale + 11);
+
+  if (!latest) return;
+
+  // raw pings
+  ctx.fillStyle = getCss('--ping');
+  for (const p of latest.pings) {
+    const [sx, sy] = toScreen(p[0], p[1], g);
+    ctx.fillRect(sx - 1, sy - 1, 2, 2);
+  }
+
+  // trails
+  for (const [id, pts] of trails) {
+    if (pts.length < 2) continue;
+    ctx.strokeStyle = 'rgba(56,240,200,0.22)'; ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const [sx, sy] = toScreen(pts[i][0], pts[i][1], g);
+      i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+
+  // tracks
+  for (const tr of latest.tracks) {
+    const [sx, sy] = toScreen(tr.pos[0], tr.pos[1], g);
+    let color;
+    if (tr.status !== 'confirmed') color = getCss('--tent');
+    else if (tr.coasting) color = getCss('--coast');
+    else color = getCss('--confirm');
+
+    if (tr.status === 'confirmed') {
+      // heading vector (velocity, scaled to ~20s look-ahead)
+      const hx = tr.pos[0] + tr.vel[0] * 20, hy = tr.pos[1] + tr.vel[1] * 20;
+      const [ex, ey] = toScreen(hx, hy, g);
+      ctx.strokeStyle = color; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      // box
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+      ctx.strokeRect(sx - 5, sy - 5, 10, 10);
+      // label: track ID + callsign (if available) + altitude
+      ctx.fillStyle = color; ctx.font = '9px monospace';
+      const callsign = tr.label ? tr.label : ('T' + tr.id);
+      const altStr = (tr.alt_km !== undefined && tr.alt_km !== null)
+        ? ' ' + tr.alt_km.toFixed(1) + 'km' : '';
+      ctx.fillText(callsign + altStr, sx + 8, sy - 7);
+      if (tr.coasting) {
+        ctx.fillStyle = getCss('--coast');
+        ctx.font = '8px monospace';
+        ctx.fillText('CST', sx + 8, sy + 3);
+      }
+    } else {
+      ctx.strokeStyle = color; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+}
+
+function getCss(v) {
+  return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+}
+
+function onFrame(d) {
+  latest = d;
+  for (const tr of d.tracks) {
+    if (tr.status !== 'confirmed') continue;
+    if (!trails.has(tr.id)) trails.set(tr.id, []);
+    const t = trails.get(tr.id);
+    t.push(tr.pos);
+    if (t.length > TRAIL_LEN) t.shift();
+  }
+  // drop trails for tracks gone for a while
+  const live = new Set(d.tracks.map(t => t.id));
+  for (const id of [...trails.keys()])
+    if (!live.has(id)) { const t = trails.get(id); if (t) t.shift(); if (!t || !t.length) trails.delete(id); }
+
+  set('s_frame', d.frame); set('s_pings', d.stats.n_pings);
+  set('s_conf', d.stats.n_confirmed);
+  set('s_tent', d.stats.n_tracks - d.stats.n_confirmed);
+  set('s_spawn', d.stats.n_spawned); set('s_del', d.stats.n_deleted);
+  draw();
+}
+function set(id, v) { document.getElementById(id).textContent = v; }
+
+function start() {
+  stop();
+  trails.clear(); latest = null;
+  const speed = document.getElementById('speed').value;
+  const isLive = current.startsWith('LIVE');
+  // Hide speed slider for live mode (poll rate is fixed by OpenSky limits)
+  document.getElementById('speedCtrl').querySelector('input') &&
+    (document.getElementById('speed').parentElement.style.opacity = isLive ? '0.3' : '1');
+  const url = isLive
+    ? `/stream?scenario=${current}`
+    : `/stream?scenario=${current}&speed=${speed}`;
+  es = new EventSource(url);
+  es.addEventListener('meta', e => {
+    const m = JSON.parse(e.data);
+    const liveTag = m.live ? ' · 🛰 OpenSky' : '';
+    document.getElementById('banner').innerHTML =
+      `<b>${m.scenario}</b>${liveTag} · origin ${m.origin[0].toFixed(3)}, ${m.origin[1].toFixed(3)}` +
+      (m.n_targets != null ? ` · ${m.n_targets} true targets · ${m.n_frames} sweeps` : ' · live feed');
+    // show/hide live indicator
+    document.getElementById('liveIndicator').classList.toggle('on', !!m.live);
+  });
+  es.addEventListener('frame', e => onFrame(JSON.parse(e.data)));
+  es.addEventListener('error_event', e => {
+    const d = JSON.parse(e.data);
+    showToast('⚠ ' + (d.msg || 'Network error'), 4000);
+  });
+  es.addEventListener('end', () => stop());
+  es.onerror = () => stop();
+  document.getElementById('play').disabled = true;
+  document.getElementById('stop').disabled = false;
+}
+function stop() {
+  if (es) { es.close(); es = null; }
+  document.getElementById('liveIndicator').classList.remove('on');
+  document.getElementById('play').disabled = false;
+  document.getElementById('stop').disabled = true;
+}
+
+let _toastTimer = null;
+function showToast(msg, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+document.getElementById('play').onclick = start;
+document.getElementById('stop').onclick = stop;
+document.getElementById('speed').oninput = e =>
+  set('speedVal', e.target.value);
+
+setInterval(() => {
+  let url = '/status';
+  if (current.startsWith('LIVE_')) {
+    const acode = current.replace('LIVE_', '');
+    url += '?airport=' + acode;
+  }
+
+  fetch(url).then(r => r.json()).then(s => {
+    // 6 frames per minute (10s interval)
+    document.getElementById('dvr_status').nextElementSibling.textContent = 'DVR Buffer (' + s.airport + ')';
+    document.getElementById('dvr_status').textContent = 
+      `${Math.floor(s.dvr_frames / 6)} / 20 min`;
+      
+    const btn = document.getElementById('btn_record');
+    if (s.recording) {
+      document.getElementById('rec_status').textContent = 
+        `${Math.floor(s.rec_frames / 6)} / 20 min`;
+      document.getElementById('rec_status').style.color = '#ff5d6c';
+      btn.disabled = true;
+      btn.textContent = 'Recording ' + s.airport + '...';
+    } else {
+      document.getElementById('rec_status').textContent = 'Idle';
+      document.getElementById('rec_status').style.color = 'var(--muted)';
+      btn.disabled = false;
+      btn.textContent = 'Record New Snapshot (' + s.airport + ')';
+    }
+  }).catch(() => {});
+}, 2000);
+
+document.getElementById('btn_record').onclick = () => {
+  fetch('/record', { method: 'POST' }).then(() => {
+    showToast('Started recording 20 min snapshot...', 3000);
+  });
+};
+
+fetch('/scenarios').then(r => r.json()).then(list => {
+  const box = document.getElementById('scenarios');
+  // group into synthetic vs live vs dvr
+  const synthetic = list.filter(s => !s.live && !s.name.startsWith("LATEST_") && !s.name.startsWith("STORED_"));
+  const dvrScns   = list.filter(s => s.name.startsWith("LATEST_") || s.name.startsWith("STORED_"));
+  const liveScns  = list.filter(s => s.live);
+
+  if (synthetic.length) {
+    const g = document.createElement('div');
+    g.className = 'label-group'; g.textContent = 'Synthetic';
+    box.appendChild(g);
+  }
+  synthetic.forEach((s, i) => {
+    const b = document.createElement('button');
+    b.className = 'scn' + (i === 0 ? ' active' : '');
+    b.innerHTML = `${s.name} — ${s.n_targets} targets<small>${s.description}</small>`;
+    b.onclick = () => { current = s.name; activate(b); start(); };
+    box.appendChild(b);
+  });
+
+  if (dvrScns.length) {
+    const g = document.createElement('div');
+    g.className = 'label-group'; g.textContent = 'High-Speed Playback';
+    box.appendChild(g);
+  }
+  dvrScns.forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'scn';
+    b.innerHTML = `${s.name}<small>${s.description}</small>`;
+    b.onclick = () => { current = s.name; activate(b); start(); };
+    box.appendChild(b);
+  });
+
+  if (liveScns.length) {
+    const g = document.createElement('div');
+    g.className = 'label-group';
+    g.innerHTML = '🛰 Live ADS-B';
+    box.appendChild(g);
+  }
+  liveScns.forEach(s => {
+    const b = document.createElement('button');
+    b.className = 'scn';
+    b.innerHTML = `${s.airport}<span class="live-badge">LIVE</span><small>${s.description}</small>`;
+    b.onclick = () => { current = s.name; activate(b); start(); };
+    box.appendChild(b);
+  });
+
+  if (list.length) current = list[0].name;
+});
+
+function activate(btn) {
+  document.querySelectorAll('#scenarios .scn').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+resize();
+</script>
+</body>
+</html>

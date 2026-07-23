@@ -1,0 +1,7 @@
+# Core engine + validation. The server and frontend use only the Python
+# standard library (http.server + SSE) and Canvas 2D -- no extra runtime deps.
+numpy>=1.24
+scipy>=1.10
+
+# Test-only
+pytest>=7.0
